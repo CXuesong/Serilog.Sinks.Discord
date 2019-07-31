@@ -145,7 +145,9 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
         public void Dispose()
         {
             shutdownCts.Cancel();
-            workerTask.Dispose();
+            if (workerTask.IsCompleted)
+                // or we will get InvalidOperationException.
+                workerTask.Dispose();
             impendingMessages.Dispose();
             impendingMessagesSemaphore.Dispose();
             shutdownCts.Dispose();

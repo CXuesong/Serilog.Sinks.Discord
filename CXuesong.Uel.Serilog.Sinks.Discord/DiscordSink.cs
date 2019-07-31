@@ -74,6 +74,12 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
         }
 
         public static LoggerConfiguration Discord(this LoggerSinkConfiguration configuration,
+            DiscordWebhookMessenger messenger, bool disposeMessenger)
+        {
+            return configuration.Sink(new DiscordSink(messenger, null, disposeMessenger));
+        }
+
+        public static LoggerConfiguration Discord(this LoggerSinkConfiguration configuration,
             DiscordWebhookMessenger messenger)
         {
             return configuration.Sink(new DiscordSink(messenger, null, false));

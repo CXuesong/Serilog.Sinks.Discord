@@ -22,14 +22,14 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
         private readonly Task workerTask;
         private readonly BlockingCollection<string?> impendingMessages = new BlockingCollection<string?>(1024);
         private readonly SemaphoreSlim impendingMessagesSemaphore = new SemaphoreSlim(0, 1024);
-        private readonly CancellationTokenSource disposalCts = new CancellationTokenSource();
+        private readonly CancellationTokenSource shutdownCts = new CancellationTokenSource();
 
         /// <param name="id">Discord webhook ID.</param>
         /// <param name="token">Discord webhook token.</param>
         public DiscordWebhookMessenger(ulong id, string token)
         {
             this.webhookId = id;
-            workerTask = WorkerAsync(token, disposalCts.Token);
+            workerTask = WorkerAsync(token, shutdownCts.Token);
         }
 
         /// <inheritdoc cref="PushMessage(string?)"/>
@@ -51,6 +51,24 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
         }
 
         /// <inheritdoc cref="PushMessage(string?)"/>
+        public void PushMessage(IFormatProvider formatProvider, string format, object? arg0)
+        {
+            PushMessage(string.Format(formatProvider, format, arg0));
+        }
+
+        /// <inheritdoc cref="PushMessage(string?)"/>
+        public void PushMessage(IFormatProvider formatProvider, string format, object? arg0, object? arg1)
+        {
+            PushMessage(string.Format(formatProvider, format, arg0, arg1));
+        }
+
+        /// <inheritdoc cref="PushMessage(string?)"/>
+        public void PushMessage(IFormatProvider formatProvider, string format, params object?[] args)
+        {
+            PushMessage(string.Format(formatProvider, format, args));
+        }
+
+        /// <inheritdoc cref="PushMessage(string?)"/>
         public void PushMessage(object? value)
         {
             PushMessage(value?.ToString());
@@ -60,10 +78,12 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
         /// Pushes a new message into the message queue.
         /// </summary>
         /// <param name="message">Content of the message.</param>
+        /// <exception cref="InvalidOperationException"><see cref="ShutdownAsync"/> has been called.</exception>
         /// <exception cref="Exception">Any exception from the message dispatching worker will be propagated from this method.</exception>
         public void PushMessage(string? message)
         {
-            if (disposalCts.IsCancellationRequested) return;
+            if (shutdownCts.IsCancellationRequested) 
+                throw new InvalidOperationException("The messenger is shutting down.");
 
             // Propagate worker's exceptions, if any.
             if (workerTask.IsFaulted) workerTask.GetAwaiter().GetResult();
@@ -114,26 +134,19 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
         /// <returns>The task that completes when the worker has ended, and throws if there is error in the worker task.</returns>
         public Task ShutdownAsync()
         {
-            disposalCts.Cancel();
+            shutdownCts.Cancel();
             return workerTask;
         }
 
         /// <inheritdoc />
+        /// <remarks>You need to call <see cref="ShutdownAsync"/> before disposing the instance, to ensure all the logs has been reliably sent to the server.</remarks>
         public void Dispose()
         {
-            disposalCts.Cancel();
-            try
-            {
-                workerTask.Wait(15 * 1000);
-            }
-            catch (Exception)
-            {
-                // According to an old convention, we shouldn't throw error in Dispose.
-            }
+            shutdownCts.Cancel();
             workerTask.Dispose();
             impendingMessages.Dispose();
             impendingMessagesSemaphore.Dispose();
-            disposalCts.Dispose();
+            shutdownCts.Dispose();
         }
 
     }

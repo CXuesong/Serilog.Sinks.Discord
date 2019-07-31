@@ -24,32 +24,43 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
         private readonly SemaphoreSlim impendingMessagesSemaphore = new SemaphoreSlim(0, 1024);
         private readonly CancellationTokenSource disposalCts = new CancellationTokenSource();
 
+        /// <param name="id">Discord webhook ID.</param>
+        /// <param name="token">Discord webhook token.</param>
         public DiscordWebhookMessenger(ulong id, string token)
         {
             this.webhookId = id;
             workerTask = WorkerAsync(token, disposalCts.Token);
         }
 
-        public void PushMessage(string format, object arg0)
+        /// <inheritdoc cref="PushMessage(string?)"/>
+        public void PushMessage(string format, object? arg0)
         {
             PushMessage(string.Format(format, arg0));
         }
 
-        public void PushMessage(string format, object arg0, object arg1)
+        /// <inheritdoc cref="PushMessage(string?)"/>
+        public void PushMessage(string format, object? arg0, object? arg1)
         {
             PushMessage(string.Format(format, arg0, arg1));
         }
 
-        public void PushMessage(string format, params object[] args)
+        /// <inheritdoc cref="PushMessage(string?)"/>
+        public void PushMessage(string format, params object?[] args)
         {
             PushMessage(string.Format(format, args));
         }
 
+        /// <inheritdoc cref="PushMessage(string?)"/>
         public void PushMessage(object? value)
         {
             PushMessage(value?.ToString());
         }
 
+        /// <summary>
+        /// Pushes a new message into the message queue.
+        /// </summary>
+        /// <param name="message">Content of the message.</param>
+        /// <exception cref="Exception">Any exception from the message dispatching worker will be propagated from this method.</exception>
         public void PushMessage(string? message)
         {
             if (disposalCts.IsCancellationRequested) return;
@@ -95,6 +106,16 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
                     await client.SendMessageAsync(message);
                 }
             }
+        }
+
+        /// <summary>
+        /// Wait until the queued messages has been drained, and shutdown the worker task.
+        /// </summary>
+        /// <returns>The task that completes when the worker has ended, and throws if there is error in the worker task.</returns>
+        public Task ShutdownAsync()
+        {
+            disposalCts.Cancel();
+            return workerTask;
         }
 
         /// <inheritdoc />

@@ -26,9 +26,11 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
 
         /// <param name="id">Discord webhook ID.</param>
         /// <param name="token">Discord webhook token.</param>
+        /// <exception cref="ArgumentNullException"><paramref name="token"/> is <c>null</c>.</exception>
         public DiscordWebhookMessenger(ulong id, string token)
         {
-            this.webhookId = id;
+            if (token == null) throw new ArgumentNullException(nameof(token));
+            webhookId = id;
             workerTask = WorkerAsync(token, shutdownCts.Token);
         }
 
@@ -123,7 +125,7 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
                 // Cleanup
                 while (impendingMessages.TryTake(out var message))
                 {
-                    await client.SendMessageAsync(message);
+                    await client.SendMessageAsync(message ?? "<null>");
                 }
             }
         }

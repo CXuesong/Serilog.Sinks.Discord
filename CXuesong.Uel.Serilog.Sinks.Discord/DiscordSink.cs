@@ -27,7 +27,7 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
         public void Emit(LogEvent logEvent)
         {
             var message = logEvent.RenderMessage(formatProvider);
-            messenger.PushMessage(message);
+            messenger.PushMessage(MarkdownUtility.Escape(message));
         }
 
         protected virtual void Dispose(bool disposing)

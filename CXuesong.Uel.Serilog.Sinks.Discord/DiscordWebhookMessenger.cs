@@ -11,12 +11,16 @@ using Discord.Webhook;
 
 namespace CXuesong.Uel.Serilog.Sinks.Discord
 {
+
+    /// <summary>
+    /// Queuing and sending textual message with Discord Webhook.
+    /// </summary>
     public class DiscordWebhookMessenger : IDisposable
     {
 
         private readonly ulong webhookId;
         private readonly Task workerTask;
-        private readonly BlockingCollection<string> impendingMessages = new BlockingCollection<string>(1024);
+        private readonly BlockingCollection<string?> impendingMessages = new BlockingCollection<string?>(1024);
         private readonly SemaphoreSlim impendingMessagesSemaphore = new SemaphoreSlim(0, 1024);
         private readonly CancellationTokenSource disposalCts = new CancellationTokenSource();
 
@@ -41,7 +45,12 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
             PushMessage(string.Format(format, args));
         }
 
-        public void PushMessage(string message)
+        public void PushMessage(object? value)
+        {
+            PushMessage(value?.ToString());
+        }
+
+        public void PushMessage(string? message)
         {
             if (disposalCts.IsCancellationRequested) return;
 

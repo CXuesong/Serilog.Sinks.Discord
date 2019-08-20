@@ -25,7 +25,7 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
         private readonly ConcurrentQueue<Embed> impendingMessages = new ConcurrentQueue<Embed>();
         private readonly SemaphoreSlim impendingMessagesSemaphore = new SemaphoreSlim(0);
         private readonly CancellationTokenSource shutdownCts = new CancellationTokenSource();
-        private TimeSpan _RequestThrottleTime = TimeSpan.FromSeconds(0);
+        private TimeSpan _RequestThrottleTime = TimeSpan.FromSeconds(1.5);
         private int _MaxMessagesPerPack = 100;
 
         /// <param name="id">Discord webhook ID.</param>

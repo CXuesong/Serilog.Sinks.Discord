@@ -1,10 +1,12 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Discord;
 using Discord.Net.Rest;
 using Discord.Rest;
 using Discord.Webhook;
@@ -20,9 +22,11 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
 
         private readonly ulong webhookId;
         private readonly Task workerTask;
-        private readonly BlockingCollection<string?> impendingMessages = new BlockingCollection<string?>(1024);
-        private readonly SemaphoreSlim impendingMessagesSemaphore = new SemaphoreSlim(0, 1024);
+        private readonly ConcurrentQueue<Embed> impendingMessages = new ConcurrentQueue<Embed>();
+        private readonly SemaphoreSlim impendingMessagesSemaphore = new SemaphoreSlim(0);
         private readonly CancellationTokenSource shutdownCts = new CancellationTokenSource();
+        private TimeSpan _RequestThrottleTime = TimeSpan.FromSeconds(0);
+        private int _MaxMessagesPerPack = 100;
 
         /// <param name="id">Discord webhook ID.</param>
         /// <param name="token">Discord webhook token.</param>
@@ -34,46 +38,45 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
             workerTask = WorkerAsync(token, shutdownCts.Token);
         }
 
-        /// <inheritdoc cref="PushMessage(string?)"/>
-        public void PushMessage(string format, object? arg0)
+        public int MaxMessagesPerPack
         {
-            PushMessage(string.Format(format, arg0));
+            get { return _MaxMessagesPerPack; }
+            set
+            {
+                if (_MaxMessagesPerPack < 1)
+                    throw new ArgumentOutOfRangeException(nameof(value), value, "Value should not be less than 1.");
+                _MaxMessagesPerPack = value;
+            }
+        }
+
+        public TimeSpan RequestThrottleTime
+        {
+            get { return _RequestThrottleTime; }
+            set
+            {
+                if (_RequestThrottleTime <= TimeSpan.Zero)
+                    throw new ArgumentOutOfRangeException(nameof(value), value, "Value should be non-negative.");
+                _RequestThrottleTime = value;
+
+            }
         }
 
         /// <inheritdoc cref="PushMessage(string?)"/>
-        public void PushMessage(string format, object? arg0, object? arg1)
+        public void PushMessage(Embed embed)
         {
-            PushMessage(string.Format(format, arg0, arg1));
-        }
+            if (embed == null) throw new ArgumentNullException(nameof(embed));
+            // Propagate worker's exceptions, if any.
+            if (workerTask.IsFaulted) workerTask.GetAwaiter().GetResult();
 
-        /// <inheritdoc cref="PushMessage(string?)"/>
-        public void PushMessage(string format, params object?[] args)
-        {
-            PushMessage(string.Format(format, args));
-        }
-
-        /// <inheritdoc cref="PushMessage(string?)"/>
-        public void PushMessage(IFormatProvider formatProvider, string format, object? arg0)
-        {
-            PushMessage(string.Format(formatProvider, format, arg0));
-        }
-
-        /// <inheritdoc cref="PushMessage(string?)"/>
-        public void PushMessage(IFormatProvider formatProvider, string format, object? arg0, object? arg1)
-        {
-            PushMessage(string.Format(formatProvider, format, arg0, arg1));
-        }
-
-        /// <inheritdoc cref="PushMessage(string?)"/>
-        public void PushMessage(IFormatProvider formatProvider, string format, params object?[] args)
-        {
-            PushMessage(string.Format(formatProvider, format, args));
-        }
-
-        /// <inheritdoc cref="PushMessage(string?)"/>
-        public void PushMessage(object? value)
-        {
-            PushMessage(value?.ToString());
+            impendingMessages.Enqueue(embed);
+            try
+            {
+                impendingMessagesSemaphore.Release();
+            }
+            catch (ObjectDisposedException)
+            {
+                // In case impendingMessagesSemaphore has been disposed.
+            }
         }
 
         /// <summary>
@@ -84,49 +87,73 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
         /// <exception cref="Exception">Any exception from the message dispatching worker will be propagated from this method.</exception>
         public void PushMessage(string? message)
         {
-            if (shutdownCts.IsCancellationRequested) 
+            if (shutdownCts.IsCancellationRequested)
                 throw new InvalidOperationException("The messenger is shutting down.");
-
-            // Propagate worker's exceptions, if any.
-            if (workerTask.IsFaulted) workerTask.GetAwaiter().GetResult();
-
-            lock (impendingMessages)
-                impendingMessages.Add(message);
-            try
-            {
-                impendingMessagesSemaphore.Release();
-            }
-            catch (ObjectDisposedException)
-            {
-                // In case impendingMessagesSemaphore has been released.
-            }
+            var embed = new EmbedBuilder().WithTitle("").WithDescription(message ?? "").Build();
+            PushMessage(embed);
         }
 
         // Long-running worker thread.
         private async Task WorkerAsync(string token, CancellationToken ct)
         {
-            using (impendingMessagesSemaphore)
-            using (var client = new DiscordWebhookClient(webhookId, token,
-                new DiscordRestConfig { RestClientProvider = DefaultRestClientProvider.Create(true) }))
+            var config = new DiscordRestConfig { RestClientProvider = DefaultRestClientProvider.Create(true) };
+#if DEBUG
+            config.LogLevel = LogSeverity.Info;
+#endif
+            using (var client = new DiscordWebhookClient(webhookId, token, config))
             {
-                try
+#if DEBUG
+                client.Log += log =>
                 {
-                    while (!ct.IsCancellationRequested)
+                    Debug.WriteLine(log.ToString());
+                    return Task.CompletedTask;
+                };
+#endif
+                var messageBuffer = new List<Embed>();
+                do
+                {
+                    try
                     {
-                        await impendingMessagesSemaphore.WaitAsync(ct);
-                        var message = impendingMessages.Take();
-                        await client.SendMessageAsync(message);
+                        await Task.Delay(_RequestThrottleTime, ct);
                     }
-                }
-                catch (OperationCanceledException)
-                {
-                    // cancelled from WaitAsync
-                }
-                // Cleanup
-                while (impendingMessages.TryTake(out var message))
-                {
-                    await client.SendMessageAsync(message ?? "<null>");
-                }
+                    catch (OperationCanceledException)
+                    {
+                        // cancelled from Delay
+                    }
+                    try
+                    {
+                        // Take 1
+                        // Consider the case where ct is cancelled and we are draining the queue.
+                        if (!impendingMessagesSemaphore.Wait(0))
+                        {
+                            await impendingMessagesSemaphore.WaitAsync(ct);
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // cancelled from WaitAsync
+                    }
+                    for (int i = 0; i < _MaxMessagesPerPack; i++)
+                    {
+                        // Consume 1
+                        var result = impendingMessages.TryDequeue(out var embed);
+                        Debug.Assert(result);
+                        if (result)
+                            messageBuffer.Add(embed);
+                        // Take another
+                        if (!impendingMessagesSemaphore.Wait(0))
+                            break;
+                    }
+                    try
+                    {
+                        await client.SendMessageAsync(embeds: messageBuffer);
+                    }
+                    catch (Exception e)
+                    {
+                        throw;
+                    }
+                    messageBuffer.Clear();
+                } while (!ct.IsCancellationRequested || impendingMessagesSemaphore.CurrentCount > 0);
             }
         }
 
@@ -148,7 +175,6 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
             if (workerTask.IsCompleted)
                 // or we will get InvalidOperationException.
                 workerTask.Dispose();
-            impendingMessages.Dispose();
             impendingMessagesSemaphore.Dispose();
             shutdownCts.Dispose();
         }

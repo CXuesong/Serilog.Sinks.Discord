@@ -32,8 +32,7 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
         /// <inheritdoc />
         public void Emit(LogEvent logEvent)
         {
-            var message = logEvent.RenderMessage(formatProvider);
-            string levelPrefix = null;
+            string? levelPrefix = null;
             var builder = new EmbedBuilder();
             switch (logEvent.Level)
             {
@@ -61,7 +60,30 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
                     builder.WithColor(Color.Red);
                     break;
             }
-            builder.WithTitle(message);
+            var message = logEvent.RenderMessage(formatProvider);
+            string? restMessage = null;
+            if (message.Length > 230)
+            {
+                var firstLineEnd = message.IndexOfAny(new[] { '\r', '\n' });
+                if (firstLineEnd < 0 || firstLineEnd > 230)
+                {
+                    builder.WithTitle(message.Substring(0, 230) + "…");
+                    restMessage = "…" + message.Substring(230);
+                }
+                else
+                {
+                    builder.WithTitle(message.Substring(0, firstLineEnd));
+                    if (message[firstLineEnd] == '\r' && message.Length > firstLineEnd + 1 && message[firstLineEnd + 1] == '\n')
+                    {
+                        firstLineEnd++;
+                    }
+                    restMessage = message.Substring(firstLineEnd + 1);
+                }
+            }
+            else
+            {
+                builder.WithTitle(message);
+            }
             var sb = new StringBuilder();
             sb.Append('`');
             sb.Append(levelPrefix);
@@ -74,7 +96,23 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
                 sb.Append(logEvent.Exception.GetType());
                 sb.Append('`');
                 sb.AppendLine();
-                sb.Append(logEvent.Exception.Message);
+                var exMessage = logEvent.Exception.Message;
+                sb.Append(exMessage.Length <= 1024 ? exMessage : exMessage.Substring(0, 1024));
+            }
+            if (restMessage != null)
+            {
+                if (sb.Length + restMessage.Length < 2030)
+                {
+                    sb.Insert(0, '\n');
+                    sb.Insert(0, restMessage);
+                }
+                else
+                {
+                    var capacity = 2030 - sb.Length;
+                    sb.Insert(0, '\n');
+                    sb.Insert(0, "…");
+                    sb.Insert(0, restMessage.Substring(0, capacity));
+                }
             }
             builder.WithDescription(sb.ToString());
             messenger.PushMessage(builder.Build());

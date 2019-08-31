@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Serilog;
@@ -17,7 +18,7 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord.Tests
             {
                 var logger = new LoggerConfiguration()
                     .MinimumLevel.Verbose()
-                    .WriteTo.Discord(messenger, true)
+                    .AuditTo.Sink(new DiscordSink(messenger, null, true))
                     .CreateLogger();
                 logger.Verbose("This is the verbose log.");
                 logger.Debug("This is the debug log.");
@@ -25,6 +26,7 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord.Tests
                 logger.Warning("Heads up! This is a warning log.");
                 logger.Error(new InvalidOperationException(), "Some error happens. {Text}", "Some text.");
                 logger.Fatal("Something fatal from the logging.");
+                logger.Information(string.Join('\n', Enumerable.Range(1, 100).Select(i => i + " - This is long long information.")));
                 await messenger.ShutdownAsync();
             }
         }

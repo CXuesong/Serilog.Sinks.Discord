@@ -144,14 +144,7 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
                         if (!impendingMessagesSemaphore.Wait(0))
                             break;
                     }
-                    try
-                    {
-                        await client.SendMessageAsync(embeds: messageBuffer);
-                    }
-                    catch (Exception e)
-                    {
-                        throw;
-                    }
+                    await client.SendMessageAsync(embeds: messageBuffer);
                     messageBuffer.Clear();
                 } while (!ct.IsCancellationRequested || impendingMessagesSemaphore.CurrentCount > 0);
             }

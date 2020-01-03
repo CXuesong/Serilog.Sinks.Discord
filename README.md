@@ -42,3 +42,13 @@ logger.Dispose();
 The logs are queued inside the sink (or `DiscordWebhookMessenger`, to be more exact). To ensure all the logs has been sent successfully to the Discord server, await `ShutdownAsync`. This means you will need to construct your own `DiscordWebhookMessenger` before calling `.WriteTo.Discord`. 
 
 `DiscordSink.Dispose` will automatically call `ShutdownAsync` and wait for at most 15 secs. in its `Dispose` implementation, when `disposeMessenger` is `true` (by default it's `false`) and the underlying `DiscordWebhookMessenger`  has not been called `ShutdownAsync` on.
+
+## Appendix: How to retrieve Webhook ID and Token
+
+Follow the guidance of this article: [Intro to Webhooks](https://support.discordapp.com/hc/en-us/articles/228383668-Intro-to-Webhooks). On the same dialog where you create the Webhook, you should be able to see the Webhook URL like this
+
+```
+https://discordapp.com/api/webhooks/[YOUR_WEBHOOK_ID]/[YOUR_WEBHOOK_TOKEN]
+```
+
+Match your Webhook URL with the pattern above. Now you have all the information.

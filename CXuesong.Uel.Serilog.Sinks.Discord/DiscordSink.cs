@@ -4,7 +4,6 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Threading;
 using Discord;
 using Serilog;
@@ -186,6 +185,17 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
         {
             return configuration.Sink(new DiscordSink(new DiscordWebhookMessenger(webhookId, webhookToken),
                 null, true));
+        }
+
+        public static LoggerConfiguration DiscordWebhook(this LoggerSinkConfiguration configuration,
+            string webhookEndpointUrl, IFormatProvider? formatProvider)
+        {
+            return configuration.Sink(new DiscordSink(new DiscordWebhookMessenger(webhookEndpointUrl), formatProvider, true));
+        }
+
+        public static LoggerConfiguration DiscordWebhook(this LoggerSinkConfiguration configuration, string webhookEndpointUrl)
+        {
+            return configuration.Sink(new DiscordSink(new DiscordWebhookMessenger(webhookEndpointUrl), null, true));
         }
 
     }

@@ -20,7 +20,6 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
     public class DiscordWebhookMessenger : IDisposable
     {
 
-        private readonly ulong webhookId;
         private readonly Task workerTask;
         private readonly ConcurrentQueue<Embed> impendingMessages = new ConcurrentQueue<Embed>();
         private readonly SemaphoreSlim impendingMessagesSemaphore = new SemaphoreSlim(0);
@@ -34,8 +33,15 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
         public DiscordWebhookMessenger(ulong id, string token)
         {
             if (token == null) throw new ArgumentNullException(nameof(token));
-            webhookId = id;
-            workerTask = WorkerAsync(token, shutdownCts.Token);
+            workerTask = WorkerAsync(config => new DiscordWebhookClient(id, token, config), shutdownCts.Token);
+        }
+
+        /// <param name="webhookEndpointUrl">Discord webhook endpoint URL.</param>
+        /// <exception cref="ArgumentNullException"><paramref name="webhookEndpointUrl"/> is <c>null</c>.</exception>
+        public DiscordWebhookMessenger(string webhookEndpointUrl)
+        {
+            if (webhookEndpointUrl == null) throw new ArgumentNullException(nameof(webhookEndpointUrl));
+            workerTask = WorkerAsync(config => new DiscordWebhookClient(webhookEndpointUrl, config), shutdownCts.Token);
         }
 
         public int MaxMessagesPerPack
@@ -57,7 +63,6 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
                 if (_RequestThrottleTime <= TimeSpan.Zero)
                     throw new ArgumentOutOfRangeException(nameof(value), value, "Value should be non-negative.");
                 _RequestThrottleTime = value;
-
             }
         }
 
@@ -94,60 +99,58 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
         }
 
         // Long-running worker thread.
-        private async Task WorkerAsync(string token, CancellationToken ct)
+        private async Task WorkerAsync(Func<DiscordRestConfig, DiscordWebhookClient> clientFactory, CancellationToken ct)
         {
             var config = new DiscordRestConfig { RestClientProvider = DefaultRestClientProvider.Create(true) };
 #if DEBUG
             config.LogLevel = LogSeverity.Info;
 #endif
-            using (var client = new DiscordWebhookClient(webhookId, token, config))
-            {
+            using var client = clientFactory(config);
 #if DEBUG
-                client.Log += log =>
-                {
-                    Debug.WriteLine(log.ToString());
-                    return Task.CompletedTask;
-                };
+            client.Log += log =>
+            {
+                Debug.WriteLine(log.ToString());
+                return Task.CompletedTask;
+            };
 #endif
-                var messageBuffer = new List<Embed>();
-                do
+            var messageBuffer = new List<Embed>();
+            do
+            {
+                try
                 {
-                    try
+                    await Task.Delay(_RequestThrottleTime, ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    // cancelled from Delay
+                }
+                try
+                {
+                    // Take 1
+                    // Consider the case where ct is cancelled and we are draining the queue.
+                    if (!impendingMessagesSemaphore.Wait(0))
                     {
-                        await Task.Delay(_RequestThrottleTime, ct);
+                        await impendingMessagesSemaphore.WaitAsync(ct);
                     }
-                    catch (OperationCanceledException)
-                    {
-                        // cancelled from Delay
-                    }
-                    try
-                    {
-                        // Take 1
-                        // Consider the case where ct is cancelled and we are draining the queue.
-                        if (!impendingMessagesSemaphore.Wait(0))
-                        {
-                            await impendingMessagesSemaphore.WaitAsync(ct);
-                        }
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        // cancelled from WaitAsync
-                    }
-                    for (int i = 0; i < _MaxMessagesPerPack; i++)
-                    {
-                        // Consume 1
-                        var result = impendingMessages.TryDequeue(out var embed);
-                        Debug.Assert(result);
-                        if (result)
-                            messageBuffer.Add(embed);
-                        // Take another
-                        if (!impendingMessagesSemaphore.Wait(0))
-                            break;
-                    }
-                    await client.SendMessageAsync(embeds: messageBuffer);
-                    messageBuffer.Clear();
-                } while (!ct.IsCancellationRequested || impendingMessagesSemaphore.CurrentCount > 0);
-            }
+                }
+                catch (OperationCanceledException)
+                {
+                    // cancelled from WaitAsync
+                }
+                for (int i = 0; i < _MaxMessagesPerPack; i++)
+                {
+                    // Consume 1
+                    var result = impendingMessages.TryDequeue(out var embed);
+                    Debug.Assert(result);
+                    if (result)
+                        messageBuffer.Add(embed);
+                    // Take another
+                    if (!impendingMessagesSemaphore.Wait(0))
+                        break;
+                }
+                await client.SendMessageAsync(embeds: messageBuffer);
+                messageBuffer.Clear();
+            } while (!ct.IsCancellationRequested || impendingMessagesSemaphore.CurrentCount > 0);
         }
 
         /// <summary>

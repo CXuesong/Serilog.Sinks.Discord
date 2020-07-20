@@ -18,12 +18,16 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
     /// Queuing and sending textual message with Discord Webhook.
     /// </summary>
     public class DiscordWebhookMessenger : IDisposable
+#if BCL_FEATURE_ASYNC_DISPOSABLE
+        , IAsyncDisposable
+#endif
     {
 
         private readonly Task workerTask;
         private readonly ConcurrentQueue<Embed> impendingMessages = new ConcurrentQueue<Embed>();
         private readonly SemaphoreSlim impendingMessagesSemaphore = new SemaphoreSlim(0);
         private readonly CancellationTokenSource shutdownCts = new CancellationTokenSource();
+        private readonly CancellationToken shutdownToken;
         private TimeSpan _RequestThrottleTime = TimeSpan.FromSeconds(1.5);
         private int _MaxMessagesPerPack = 100;
 
@@ -34,6 +38,7 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
         {
             if (token == null) throw new ArgumentNullException(nameof(token));
             workerTask = WorkerAsync(config => new DiscordWebhookClient(id, token, config), shutdownCts.Token);
+            shutdownToken = shutdownCts.Token;
         }
 
         /// <param name="webhookEndpointUrl">Discord webhook endpoint URL.</param>
@@ -92,7 +97,7 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
         /// <exception cref="Exception">Any exception from the message dispatching worker will be propagated from this method.</exception>
         public void PushMessage(string? message)
         {
-            if (shutdownCts.IsCancellationRequested)
+            if (shutdownToken.IsCancellationRequested)
                 throw new InvalidOperationException("The messenger is shutting down.");
             var embed = new EmbedBuilder().WithTitle("").WithDescription(message ?? "").Build();
             PushMessage(embed);
@@ -175,5 +180,23 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
             shutdownCts.Dispose();
         }
 
+#if BCL_FEATURE_ASYNC_DISPOSABLE
+        /// <inheritdoc />
+        public async ValueTask DisposeAsync()
+        {
+            if (shutdownToken.IsCancellationRequested) return;
+            shutdownCts.Cancel();
+            impendingMessagesSemaphore.Dispose();
+            shutdownCts.Dispose();
+            try
+            {
+                await workerTask;
+            }
+            catch (Exception)
+            {
+                // We are not throwing in Dispose method.
+            }
+        }
+#endif
     }
 }

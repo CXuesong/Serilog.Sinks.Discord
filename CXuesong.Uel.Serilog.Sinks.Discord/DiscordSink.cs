@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using Discord;
 using Serilog;
 using Serilog.Configuration;
@@ -18,6 +19,9 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
     /// Serilog sink implementation for Discord Webhooks.
     /// </summary>
     public class DiscordSink : ILogEventSink, IDisposable
+#if BCL_FEATURE_ASYNC_DISPOSABLE
+, IAsyncDisposable
+#endif
     {
 
         private readonly DiscordWebhookMessenger messenger;
@@ -149,13 +153,20 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
             }
         }
 
+#if BCL_FEATURE_ASYNC_DISPOSABLE
+        /// <inheritdoc />
+        public ValueTask DisposeAsync()
+        {
+            return messenger.DisposeAsync();
+        }
+#endif
+
         /// <inheritdoc />
         public void Dispose()
         {
             Dispose(true);
             GC.SuppressFinalize(this);
         }
-
     }
 
     /// <summary>

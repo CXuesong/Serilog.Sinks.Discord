@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Serilog;
+using Serilog.Events;
 using Xunit;
 
 namespace CXuesong.Uel.Serilog.Sinks.Discord.Tests
@@ -18,7 +19,7 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord.Tests
             {
                 var logger = new LoggerConfiguration()
                     .MinimumLevel.Verbose()
-                    .AuditTo.Sink(new DiscordSink(messenger, null, true))
+                    .AuditTo.Sink(new DiscordSink(messenger, default, default, default, disposeMessenger: true))
                     .CreateLogger();
                 logger.Verbose("This is the verbose log.");
                 logger.Debug("This is the debug log.");

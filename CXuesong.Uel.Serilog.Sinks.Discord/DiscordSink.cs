@@ -14,23 +14,35 @@ using Serilog.Events;
 namespace CXuesong.Uel.Serilog.Sinks.Discord
 {
 
+    /// <summary>
+    /// Serilog sink implementation for Discord Webhooks.
+    /// </summary>
     public class DiscordSink : ILogEventSink, IDisposable
     {
 
         private readonly DiscordWebhookMessenger messenger;
+        private readonly LogEventLevel minimumLevel;
+        private readonly LoggingLevelSwitch? levelSwitch;
         private readonly IFormatProvider? formatProvider;
         private readonly bool disposeMessenger;
 
-        public DiscordSink(DiscordWebhookMessenger messenger, IFormatProvider? formatProvider, bool disposeMessenger)
+        public DiscordSink(DiscordWebhookMessenger messenger,
+            LogEventLevel minimumLevel, LoggingLevelSwitch? levelSwitch,
+            IFormatProvider? formatProvider, bool disposeMessenger)
         {
             this.messenger = messenger ?? throw new ArgumentNullException(nameof(messenger));
+            this.minimumLevel = minimumLevel;
+            this.levelSwitch = levelSwitch;
             this.formatProvider = formatProvider;
             this.disposeMessenger = disposeMessenger;
         }
 
         /// <inheritdoc />
-        public void Emit(LogEvent logEvent)
+        public virtual void Emit(LogEvent logEvent)
         {
+            if (logEvent.Level < minimumLevel) return;
+            if (levelSwitch != null && logEvent.Level < levelSwitch.MinimumLevel) return;
+
             string? levelPrefix = null;
             var builder = new EmbedBuilder();
             switch (logEvent.Level)
@@ -146,56 +158,40 @@ namespace CXuesong.Uel.Serilog.Sinks.Discord
 
     }
 
+    /// <summary>
+    /// Provides extension methods for Discord logging sinks.
+    /// </summary>
     public static class DiscordSinkExtensions
     {
 
         public static LoggerConfiguration Discord(this LoggerSinkConfiguration configuration,
-            DiscordWebhookMessenger messenger, IFormatProvider? formatProvider, bool disposeMessenger)
+            DiscordWebhookMessenger messenger,
+            LogEventLevel minimumLevel = LogEventLevel.Verbose,
+            LoggingLevelSwitch? levelSwitch = default,
+            IFormatProvider? formatProvider = default,
+            bool disposeMessenger = default)
         {
-            return configuration.Sink(new DiscordSink(messenger, formatProvider, disposeMessenger));
-        }
-
-        public static LoggerConfiguration Discord(this LoggerSinkConfiguration configuration,
-            DiscordWebhookMessenger messenger, IFormatProvider? formatProvider)
-        {
-            return configuration.Sink(new DiscordSink(messenger, formatProvider, false));
-        }
-
-        public static LoggerConfiguration Discord(this LoggerSinkConfiguration configuration,
-            DiscordWebhookMessenger messenger, bool disposeMessenger)
-        {
-            return configuration.Sink(new DiscordSink(messenger, null, disposeMessenger));
-        }
-
-        public static LoggerConfiguration Discord(this LoggerSinkConfiguration configuration,
-            DiscordWebhookMessenger messenger)
-        {
-            return configuration.Sink(new DiscordSink(messenger, null, false));
+            return configuration.Sink(new DiscordSink(messenger, minimumLevel, levelSwitch, formatProvider, disposeMessenger));
         }
 
         public static LoggerConfiguration DiscordWebhook(this LoggerSinkConfiguration configuration,
-            ulong webhookId, string webhookToken, IFormatProvider? formatProvider)
+            ulong webhookId, string webhookToken,
+            LogEventLevel minimumLevel = LogEventLevel.Verbose,
+            LoggingLevelSwitch? levelSwitch = default,
+            IFormatProvider? formatProvider = default)
         {
-            return configuration.Sink(new DiscordSink(new DiscordWebhookMessenger(webhookId, webhookToken),
-                formatProvider, true));
+            return configuration.Discord(new DiscordWebhookMessenger(webhookId, webhookToken),
+                minimumLevel, levelSwitch, formatProvider, disposeMessenger: true);
         }
 
         public static LoggerConfiguration DiscordWebhook(this LoggerSinkConfiguration configuration,
-            ulong webhookId, string webhookToken)
+            string webhookEndpointUrl,
+            LogEventLevel minimumLevel = LogEventLevel.Verbose,
+            LoggingLevelSwitch? levelSwitch = default,
+            IFormatProvider? formatProvider = default)
         {
-            return configuration.Sink(new DiscordSink(new DiscordWebhookMessenger(webhookId, webhookToken),
-                null, true));
-        }
-
-        public static LoggerConfiguration DiscordWebhook(this LoggerSinkConfiguration configuration,
-            string webhookEndpointUrl, IFormatProvider? formatProvider)
-        {
-            return configuration.Sink(new DiscordSink(new DiscordWebhookMessenger(webhookEndpointUrl), formatProvider, true));
-        }
-
-        public static LoggerConfiguration DiscordWebhook(this LoggerSinkConfiguration configuration, string webhookEndpointUrl)
-        {
-            return configuration.Sink(new DiscordSink(new DiscordWebhookMessenger(webhookEndpointUrl), null, true));
+            return configuration.Discord(new DiscordWebhookMessenger(webhookEndpointUrl),
+                minimumLevel, levelSwitch, formatProvider, disposeMessenger: true);
         }
 
     }
